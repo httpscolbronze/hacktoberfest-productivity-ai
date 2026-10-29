@@ -1,67 +1,74 @@
-import ollama
-import json
-import re
 
-# Gaz's server IP
-GAZ_IP = 'http://172.18.254.36:11434'
-client = ollama.Client(host=GAZ_IP)
-MODEL = 'llama3.2'
+import requests
 
-def clean_json_response(raw_text: str) -> dict:
-    """Helper to safely extract JSON even if the model wraps it in markdown."""
+
+def generate_plan(telemetry_data, query):
+    print(f"[AI Engine] Firing up local AI assistant for query: {query}...")
+
+    local_endpoint = "http://127.0.0.1:11434/api/generate"
+
+    prompt = (
+        f"You are an AI schedule assistant. The user asked: '{query}'. "
+        "Create a realistic and productive schedule or timetable. "
+        "Include time slots (e.g. 08:00 - 10:00) with specific activities. "
+        "Keep it concise, actionable, and formatted with bullet points."
+    )
+
     try:
-        # Match anything between curly braces
-        json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(0))
-        return json.loads(raw_text)
-    except Exception:
-        # Fallback in case parsing fails
-        return {
-            "checklist": [
-                "Review today's study goals for 25 minutes",
-                "Lock non-essential apps",
-                "Complete one focused work sprint"
-            ],
-            "advice": "Keep your screen time in check and stick to high-priority tasks."
-        }
+        response = requests.post(
+            local_endpoint,
+            json={
+                "model": "tinyllama",
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "num_predict": 150,
+                    "temperature": 0.6,
+                },
+            },
+            timeout=45,
+        )
 
-def generate_study_plan(user_goals: str, app_usage: dict) -> dict:
-    """
-    Takes student goals and tracked screen time (from Ghost),
-    and returns a structured daily checklist and strict timing advice.
-    """
-    prompt = f"""
-    You are a strict, futuristic AI productivity assistant.
-    User's Academic Goals: {user_goals}
-    Current Device App Usage (in minutes): {app_usage}
+        response.raise_for_status()
 
-    Analyze the usage. If distracting apps are high, impose strict timings.
-    Create a prioritized 3 to 4 item daily checklist for them.
+        plan = response.json().get("response", "").strip()
 
-    Respond ONLY in valid JSON matching this exact structure:
-    {{
-        "advice": "one short, strict sentence on their usage",
-        "checklist": [
-            "Task 1 description",
-            "Task 2 description",
-            "Task 3 description"
-        ]
-    }}
-    """
-    
-    response = client.chat(model=MODEL, messages=[
-        {'role': 'user', 'content': prompt}
-    ])
-    
-    return clean_json_response(response['message']['content'])
+        if plan:
+            return plan
 
-def get_motivational_quote() -> str:
-    """Generates a short, punchy quote for Soap's dark-aesthetic GUI banner."""
-    prompt = "Give me one short, aggressive, futuristic motivational quote about discipline and focus. Under 12 words. Do not use quotation marks."
-    
-    response = client.chat(model=MODEL, messages=[
-        {'role': 'user', 'content': prompt}
-    ])
-    
-    return response['message']['content'].strip()
+        print("[AI Engine] Empty response. Using static fallback.")
+        return _static_fallback(query)
+
+    except (requests.exceptions.RequestException, ValueError) as e:
+        print(f"[AI Engine] Local AI failed. Using static fallback: {e}")
+        return _static_fallback(query)
+
+
+def _static_fallback(query):
+    """Last resort when the local AI is unavailable."""
+    query_lower = query.lower()
+
+    if "week" in query_lower:
+        return (
+            "📅 Weekly Focus Strategy:\n"
+            "• Mon-Tue: Deep Work & Critical Architecture\n"
+            "• Wed: Core Feature Development\n"
+            "• Thu: Squad Sync & Integration Testing\n"
+            "• Fri: Bug Bashes, Review & Weekend Prep"
+        )
+    elif "priority" in query_lower or "task" in query_lower:
+        return (
+            "🎯 Prioritized Action Matrix:\n"
+            "1. P0 (Immediate): Core blocker bugs & API contract fixes\n"
+            "2. P1 (Today): Primary feature requirements & unit tests\n"
+            "3. P2 (Upcoming): Performance profiling & code cleanup"
+        )
+
+    return (
+        "⚡ Daily Focus Timetable:\n"
+        "• 08:00 - 09:00 | Standup, Planning & Inbox Zero\n"
+        "• 09:00 - 12:00 | Deep Lockdown Coding Block (Sprint 1)\n"
+        "• 12:00 - 13:00 | Nutritional Fuel & Screen Disconnect\n"
+        "• 13:00 - 16:00 | Collaborative Building & Integration (Sprint 2)\n"
+        "• 16:00 - 17:30 | Code Reviews & Retrospective"
+    )
